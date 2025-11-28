@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: tds-quiz-solver
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter  # Or 'standard' for more resources
+    healthCheckPath: /healthz
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false  # You'll set this manually in the Render dashboard
+      - key: PORT
+        value: 7860

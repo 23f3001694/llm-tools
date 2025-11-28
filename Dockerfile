@@ -33,6 +33,7 @@ ENV PATH="/root/.local/bin:$PATH"
 
 # Copy project files
 COPY pyproject.toml .
+COPY README.md .
 COPY src/ ./src/
 
 # Install dependencies

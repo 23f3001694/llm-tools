@@ -63,6 +63,7 @@ def post_request(
         "sending_post_request",
         url=url,
         payload_keys=list(payload.keys()),
+        answer=payload.get("answer"),  # Log the actual answer for debugging
     )
     
     try:

@@ -24,7 +24,17 @@ class Settings(BaseSettings):
     secret: str
 
     # API Keys - only Google required for Gemini
-    google_api_key: str
+    # Supports both GOOGLE_API_KEY and GEMINI_API_KEY
+    google_api_key: str | None = None
+    gemini_api_key: str | None = None
+    
+    @property
+    def api_key(self) -> str:
+        """Get the API key, supporting both naming conventions."""
+        key = self.google_api_key or self.gemini_api_key
+        if not key:
+            raise ValueError("Either GOOGLE_API_KEY or GEMINI_API_KEY must be set")
+        return key
 
     # Logging
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"

@@ -64,13 +64,15 @@ class GeminiClient:
 
     def _initialize_model(self) -> None:
         """Initialize the Gemini model."""
-        if not self.settings.google_api_key:
-            raise LLMClientError("GOOGLE_API_KEY is required for Gemini")
+        api_key = self.settings.api_key  # Uses property that supports both env var names
+        if not api_key:
+            raise LLMClientError("GOOGLE_API_KEY or GEMINI_API_KEY is required")
 
         self._model = ChatGoogleGenerativeAI(
             model=self.model_name,
-            api_key=self.settings.google_api_key,
+            api_key=api_key,
             temperature=0.0,
+            timeout=60,  # 60 second timeout for API calls
         )
 
         # Bind tools if provided
