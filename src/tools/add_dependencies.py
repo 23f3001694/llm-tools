@@ -26,15 +26,23 @@ ALLOWED_PACKAGES = {
     # Web/API
     "requests", "httpx", "beautifulsoup4", "lxml",
     # Data formats
-    "pyyaml", "toml", "json5",
+    "pyyaml", "toml", "json5", "xmltodict", "html5lib", "markdown",
     # Statistics/ML
-    "scikit-learn", "statsmodels",
+    "scikit-learn", "statsmodels", "sympy",
     # Geo
     "geopy", "shapely", "geopandas",
     # Network
     "networkx",
+    # String/text processing
+    "fuzzywuzzy", "python-Levenshtein", "regex", "chardet",
+    # Date/time
+    "python-dateutil", "pytz", "dateparser",
+    # Validation/parsing
+    "phonenumbers", "pycountry", "babel", "validators",
+    # Crypto
+    "cryptography",
     # Misc utilities
-    "tqdm", "python-dateutil", "pytz", "chardet",
+    "tqdm", "tabulate",
 }
 
 

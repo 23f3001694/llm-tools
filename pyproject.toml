@@ -43,6 +43,45 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "tenacity>=9.0.0",
     "structlog>=24.0.0",
+    
+    # Data science (pre-installed for agent)
+    "numpy>=1.26.0",
+    "scipy>=1.12.0",
+    "polars>=0.20.0",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
+    "plotly>=5.18.0",
+    "altair>=5.2.0",
+    "scikit-learn>=1.4.0",
+    "statsmodels>=0.14.0",
+    "networkx>=3.2.0",
+    "python-dateutil>=2.8.0",
+    "pytz>=2024.1",
+    "chardet>=5.2.0",
+    "tqdm>=4.66.0",
+    "pyyaml>=6.0.0",
+    "toml>=0.10.0",
+    "json5>=0.9.0",
+    "python-docx>=1.1.0",
+    "geopy>=2.4.0",
+    "shapely>=2.0.0",
+    "geopandas>=0.14.0",
+    
+    # Additional useful packages
+    "fuzzywuzzy>=0.18.0",        # Fuzzy string matching
+    "python-Levenshtein>=0.25.0", # Fast string matching
+    "regex>=2024.0.0",           # Advanced regex
+    "sympy>=1.12.0",             # Symbolic math
+    "cryptography>=42.0.0",      # Encryption/hashing
+    "dateparser>=1.2.0",         # Parse various date formats
+    "phonenumbers>=8.13.0",      # Phone number parsing
+    "pycountry>=24.0.0",         # Country/currency codes
+    "babel>=2.14.0",             # Locale/currency formatting
+    "xmltodict>=0.13.0",         # XML parsing
+    "html5lib>=1.1",             # HTML parsing
+    "markdown>=3.5.0",           # Markdown processing
+    "tabulate>=0.9.0",           # Table formatting
+    "validators>=0.22.0",        # URL/email validation
 ]
 
 [project.optional-dependencies]
