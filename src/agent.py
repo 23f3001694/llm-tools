@@ -38,6 +38,40 @@ SOFT_TIMEOUT_SECONDS = 160  # Soft timeout - submit dummy answer to get next URL
 
 
 # -------------------------------------------------
+# SUBMIT URL EXTRACTION FROM HTML
+# -------------------------------------------------
+SUBMIT_URL_PATTERNS = [
+    # Common patterns in HTML for submit endpoints
+    re.compile(r'action=["\']([^"\']*submit[^"\']*)["\']', re.IGNORECASE),
+    re.compile(r'href=["\']([^"\']*submit[^"\']*)["\']', re.IGNORECASE),
+    re.compile(r'post_request\(["\']([^"\']*submit[^"\']*)["\']', re.IGNORECASE),
+    re.compile(r'/submit/\d+', re.IGNORECASE),
+    re.compile(r'/submit', re.IGNORECASE),
+]
+
+
+def extract_submit_url_from_html(html_content: str, base_url: str = "") -> str | None:
+    """Extract submit URL from HTML content."""
+    for pattern in SUBMIT_URL_PATTERNS:
+        match = pattern.search(html_content)
+        if match:
+            url = match.group(0) if match.lastindex is None else match.group(1)
+            # Handle relative URLs
+            if url.startswith('/') and base_url:
+                from urllib.parse import urlparse
+                parsed = urlparse(base_url)
+                url = f"{parsed.scheme}://{parsed.netloc}{url}"
+            elif url.startswith('http'):
+                return url
+            elif base_url:
+                # Relative path
+                from urllib.parse import urljoin
+                url = urljoin(base_url, url)
+            return url
+    return None
+
+
+# -------------------------------------------------
 # MEDIA DATA EXTRACTION (audio, image, video, PDF)
 # -------------------------------------------------
 MEDIA_DATA_PATTERN = re.compile(
@@ -81,6 +115,8 @@ class ProblemState(TypedDict):
     detected_submit_url: str | None
     # Track the last submitted answer (for retry feedback)
     last_submitted_answer: str | None
+    # Track consecutive empty responses to break infinite loops
+    consecutive_empty_responses: int
 
 
 # -------------------------------------------------
@@ -139,18 +175,18 @@ STRICT RULES:
    - Use get_rendered_html ONLY for HTML pages
 
 3. AUDIO/MEDIA ANALYSIS (CRITICAL):
-   - When you receive audio via fetch_media, LISTEN CAREFULLY to understand the TASK INSTRUCTION
-   - Audio often contains INSTRUCTIONS for what calculation to perform (e.g., "sum values greater than X")
-   - The audio does NOT contain the answer directly - it tells you HOW to calculate the answer
-   - After understanding the audio instruction:
-     a) Extract any parameters from the rendered HTML page (like cutoff values, thresholds)
-     b) Download any referenced data files (CSV, etc.)
-     c) Write and run Python code to perform the calculation described in the audio
-     d) The code output is your answer
-   - Example: If audio says "sum all values >= cutoff" and page shows "Cutoff: 50000":
-     - Download the CSV file
-     - Run code: df[df['column'] >= 50000].sum()
-     - Submit the result
+   - When you receive audio via fetch_media, FIRST TRANSCRIBE IT WORD-FOR-WORD
+   - The audio contains TASK INSTRUCTIONS telling you what calculation to perform
+   - Common audio instructions include things like:
+     * "Find the sum of values where [column] is greater than [threshold]"
+     * "Count records matching [condition]"
+     * "Calculate [metric] for rows where [filter]"
+   - The audio NEVER contains the answer directly - it tells you HOW to calculate
+   - After transcribing:
+     a) Parse the HTML page to get any thresholds/parameters mentioned
+     b) Download referenced data files (CSV, JSON, etc.)
+     c) Write Python code that implements the exact calculation from the audio
+     d) Print and submit the numeric result
 
 4. CODE EXECUTION:
    - Always use print() to output the final answer
@@ -248,19 +284,30 @@ class ProblemSolver:
     async def _tools_node(self, state: ProblemState) -> dict:
         """
         Custom tools node that intercepts post_request results to detect submissions.
+        Also extracts submit URL from HTML responses for fallback.
         Uses async invocation to support async tools like get_rendered_html.
         """
         # Run the standard ToolNode asynchronously
         tool_node = ToolNode(TOOLS)
         result = await tool_node.ainvoke(state)
         
-        # Check if any tool response contains submission result
+        # Check if any tool response contains submission result or HTML with submit URL
         messages = result.get("messages", [])
         updates = {}
+        problem_url = state.get("problem_url", "")
         
         for msg in messages:
             if isinstance(msg, ToolMessage):
                 content = getattr(msg, "content", "")
+                
+                # Try to extract submit URL from HTML content (for fallback)
+                if isinstance(content, str) and not state.get("detected_submit_url"):
+                    # Check if this looks like HTML (from get_rendered_html)
+                    if "<" in content and ("submit" in content.lower() or "form" in content.lower()):
+                        submit_url = extract_submit_url_from_html(content, problem_url)
+                        if submit_url:
+                            updates["detected_submit_url"] = submit_url
+                            logger.info("submit_url_extracted_from_html", url=submit_url)
                 
                 try:
                     # Try to parse as JSON
@@ -315,7 +362,18 @@ class ProblemSolver:
         import base64
         
         media_prompts = {
-            "audio": "Listen carefully to this audio. It contains INSTRUCTIONS for solving the quiz (e.g., what calculation to perform). Transcribe the instruction, then use the tools to perform the required calculation with data from the page/files.",
+            "audio": """CRITICAL AUDIO INSTRUCTION - Listen VERY carefully to this audio file:
+
+1. FIRST: Transcribe EXACTLY what is said in the audio, word for word
+2. The audio contains a TASK INSTRUCTION (e.g., "find the sum of values where column X is greater than Y")
+3. After transcription, identify:
+   - What operation to perform (sum, count, filter, etc.)
+   - What column/field to use
+   - What condition/threshold to apply
+4. Then execute that calculation using downloaded data files and run_code
+5. The audio does NOT contain the answer - it tells you WHAT CALCULATION to do
+
+Transcribe the audio now, then follow the instructions.""",
             "image": "Look at this image carefully. Extract any relevant information needed to answer the quiz question.",
             "video": "Watch this video carefully. Extract any relevant information needed to answer the quiz question.",
             "document": "Read this PDF document carefully. Extract any relevant information needed to answer the quiz question.",
@@ -445,18 +503,43 @@ class ProblemSolver:
         
         try:
             result = self.llm_client.invoke(llm_messages)
-            logger.info("problem_solver_response", 
-                       has_tool_calls=bool(getattr(result, "tool_calls", None)),
-                       content_length=len(str(getattr(result, "content", ""))))
-            
-            # Extract SUBMIT_URL from AI response if present
-            updates = {"messages": [result]}
+            has_tool_calls = bool(getattr(result, "tool_calls", None))
             content = getattr(result, "content", "")
+            content_length = len(str(content)) if content else 0
+            
+            logger.info("problem_solver_response", 
+                       has_tool_calls=has_tool_calls,
+                       content_length=content_length)
+            
+            # Track consecutive empty responses
+            updates = {"messages": [result]}
+            
+            if not has_tool_calls and content_length == 0:
+                # Empty response - increment counter
+                empty_count = state.get("consecutive_empty_responses", 0) + 1
+                updates["consecutive_empty_responses"] = empty_count
+                logger.warning("empty_llm_response", count=empty_count)
+                
+                # After 3 empty responses, inject a nudge message
+                if empty_count >= 3:
+                    logger.warning("injecting_nudge_after_empty_responses", count=empty_count)
+                    nudge = HumanMessage(content="""You have not responded. Please continue working on the problem.
+
+If you have the data needed, use run_code to calculate the answer.
+If you need to submit, use post_request with the submit URL.
+If you're stuck, say "PROBLEM_DONE correct:false next_url:none" to move on.""")
+                    updates["messages"] = [result, nudge]
+                    updates["consecutive_empty_responses"] = 0  # Reset after nudge
+            else:
+                # Non-empty response - reset counter
+                updates["consecutive_empty_responses"] = 0
+            
+            # Extract SUBMIT_URL from AI response if present - LLM URL always takes priority
             if isinstance(content, str):
                 submit_url = self._extract_submit_url_from_llm(content)
-                if submit_url and not state.get("detected_submit_url"):
+                if submit_url:
                     updates["detected_submit_url"] = submit_url
-                    logger.info("submit_url_extracted_from_llm", url=submit_url)
+                    logger.info("submit_url_from_llm", url=submit_url)
             
             return updates
         except Exception as e:
@@ -470,6 +553,11 @@ class ProblemSolver:
             logger.info("routing_to_end_submission_made", 
                        correct=state.get("submission_correct"),
                        next_url=state.get("submission_next_url"))
+            return END
+        
+        # Check message count to prevent infinite loops (max 50 messages)
+        if len(state["messages"]) > 50:
+            logger.warning("max_messages_reached", count=len(state["messages"]))
             return END
         
         last = state["messages"][-1]
@@ -607,6 +695,7 @@ You MUST try a DIFFERENT approach:
             "submission_next_url": None,
             "detected_submit_url": None,
             "last_submitted_answer": None,
+            "consecutive_empty_responses": 0,
         }
         
         try:
